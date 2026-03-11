@@ -1,0 +1,1 @@
+#depois de ter o script de grafos, tenho de pedir ao chat um script p correr o ficheiro num cluster pois preciso de enviar slearn jobs para ele correr e dar exemplo de slearn do chaparro 

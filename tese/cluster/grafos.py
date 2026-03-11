@@ -1,0 +1,1 @@
+#este codio dos grafos tem de estar adaptado a trabalhar com o cluster de GPU 
