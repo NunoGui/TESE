@@ -1,0 +1,34 @@
+# Dataset
+dataset: emorecsys
+data_path: dataset/
+
+# Splitting
+eval_args:
+  split: {'RS': [0.8, 0.1, 0.1]}
+  group_by: user
+  order: RO
+  mode: full
+
+# Métricas
+metrics: ['Recall', 'MRR', 'NDCG', 'Hit', 'Precision']
+topk: [10]
+valid_metric: Recall@10
+
+# Modelo NGCF
+embedding_size: 64
+hidden_size_list: [64, 64, 64]
+node_dropout: 0.1
+message_dropout: 0.1
+
+# Treino
+epochs: 50
+train_batch_size: 2048
+eval_batch_size: 512
+learning_rate: 0.001
+neg_sampling:
+  uniform: 1
+
+# Reprodutibilidade
+seed: 42
+reproducibility: True
+show_progress: False
