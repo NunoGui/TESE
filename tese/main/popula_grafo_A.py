@@ -7,9 +7,9 @@ USER     = "neo4j"
 PASSWORD = "EmoRecSys"  
  
 # ── Caminhos dos CSVs
-PATH_USERS   = "users.csv"
-PATH_IMAGES  = "images.csv"
-PATH_RATINGS = "ratings_full.csv"
+PATH_USERS   = "data/users.csv"
+PATH_IMAGES  = "data/images.csv"
+PATH_RATINGS = "data/ratings_full.csv"
  
 # ── Carregar dados dos CSVs 
 print("A carregar CSVs...")

@@ -7,18 +7,17 @@ from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 import matplotlib.pyplot as plt
 import random
  
-# ── Reprodutibilidade ──────────────────────────────────────────────────────
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
  
-# ── Carregar dados ─────────────────────────────────────────────────────────
+# ── Carregar dados 
 print("A carregar dados...")
 ratings = pd.read_csv('ratings_full.csv')
  
-EMO_COLS = ['happiness', 'sadness', 'anger', 'fear', 'surprise', 'disgust', 'neutral']
-VAD_COLS = ['valence', 'arousal', 'dominance']
+emotions = ['happiness', 'sadness', 'anger', 'fear', 'surprise', 'disgust', 'neutral']
+VAD = ['valence', 'arousal', 'dominance']
  
 # Encoders
 user_enc  = LabelEncoder()
@@ -28,11 +27,11 @@ ratings['image_idx'] = image_enc.fit_transform(ratings['image_id'])
  
 n_users  = ratings['user_idx'].nunique()
 n_images = ratings['image_idx'].nunique()
-n_emo    = len(EMO_COLS)  # 7 nós de emoção
+n_emo    = len(emotions)  # 7 nós de emoção
  
 print(f"Utilizadores: {n_users} | Imagens: {n_images} | Emoções: {n_emo}")
  
-# ── Split 12/3/17 por utilizador ───────────────────────────────────────────
+# ── Split 12/3/17 por utilizador 
 print("\nA construir split 12/3 + 17 random...")
  
 train_data = []
@@ -60,20 +59,20 @@ for user_idx, grupo in ratings.groupby('user_idx'):
 train_df = pd.concat(train_data).reset_index(drop=True)
 print(f"Treino: {len(train_df)} | Teste: {len(test_data)}")
  
-# ── Normalizar scores emocionais ───────────────────────────────────────────
+# ── Normalizar scores emocionais 
 scaler = MinMaxScaler()
-train_df[EMO_COLS] = scaler.fit_transform(train_df[EMO_COLS])
+train_df[emotions] = scaler.fit_transform(train_df[emotions])
  
-# ── Offsets dos nós ────────────────────────────────────────────────────────
+# ── Offsets dos nós 
 IMG_OFFSET = n_users
 EMO_OFFSET = n_users + n_images
 N_TOTAL    = n_users + n_images + n_emo
  
-# ── Construir arestas RATED (User → Image) ─────────────────────────────────
+# ── Construir arestas RATED (User → Image) 
 u_rated = torch.tensor(train_df['user_idx'].values, dtype=torch.long)
 i_rated = torch.tensor(train_df['image_idx'].values + IMG_OFFSET, dtype=torch.long)
  
-# ── Construir arestas FELT (User → Emotion) com image_id como contexto ─────
+# ── Construir arestas FELT (User → Emotion) com image_id como contexto 
 # Cada aresta representa: user X sentiu emoção Y com score Z ao ver imagem W
 # O image_id fica como propriedade da aresta — preserva o contexto
 print("\nA construir arestas FELT com contexto de imagem...")
@@ -86,7 +85,7 @@ felt_img  = []  # image_idx (contexto — não usado pelo GNN mas preservado)
 for _, row in train_df.iterrows():
     u     = int(row['user_idx'])
     img   = int(row['image_idx'])
-    for emo_idx, col in enumerate(EMO_COLS):
+    for emo_idx, col in enumerate(emotions):
         score = float(row[col])
         if score > 0:
             felt_src.append(u)
@@ -101,10 +100,10 @@ felt_wgt = torch.tensor(felt_wgt, dtype=torch.float32)
  
 print(f"Arestas RATED: {len(u_rated)}")
 print(f"Arestas FELT:  {len(felt_src)} (com image_id preservado em cada aresta)")
-print(f"  → Exemplo: User {felt_src[0].item()} sentiu {EMO_COLS[felt_dst[0].item()-EMO_OFFSET]} "
+print(f"  → Exemplo: User {felt_src[0].item()} sentiu {emotions[felt_dst[0].item()-EMO_OFFSET]} "
       f"(score={felt_wgt[0]:.2f}) ao ver Imagem {felt_img[0]}")
  
-# ── Construir matriz de adjacência normalizada ─────────────────────────────
+# ── Construir matriz de adjacência normalizada 
 def build_hetero_adj(u_rated, i_rated, felt_src, felt_dst, felt_wgt, N):
     # RATED — bidirecional
     row_r = torch.cat([u_rated, i_rated])
@@ -133,7 +132,7 @@ print("\nA construir grafo heterogéneo...")
 adj = build_hetero_adj(u_rated, i_rated, felt_src, felt_dst, felt_wgt, N_TOTAL)
 print(f"Grafo: {N_TOTAL} nós ({n_users} users + {n_images} images + {n_emo} emotions)")
  
-# ── Modelo HeteroLightGCN ──────────────────────────────────────────────────
+# ── Modelo HeteroLightGCN 
 class HeteroLightGCN(nn.Module):
     def __init__(self, n_total, emb_dim=64, n_layers=3):
         super().__init__()
@@ -154,7 +153,7 @@ class HeteroLightGCN(nn.Module):
         i = all_embs[items]
         return (u * i).sum(dim=1)
  
-# ── Treino BPR ─────────────────────────────────────────────────────────────
+# ── Treino BPR 
 model     = HeteroLightGCN(N_TOTAL, emb_dim=64, n_layers=3)
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 train_pos = train_df[train_df['rating'] == 1].reset_index(drop=True)
@@ -187,7 +186,7 @@ for epoch in range(EPOCHS):
     if (epoch + 1) % 10 == 0:
         print(f"  Epoch {epoch+1:3d} | Loss: {total_loss:.4f}")
  
-# ── Avaliação ──────────────────────────────────────────────────────────────
+# ── Avaliação 
 print("\nA avaliar...")
 model.eval()
 with torch.no_grad():
@@ -233,7 +232,7 @@ print(f"Recall@1:     {recall_at_k[0]:.4f}")
 print(f"Recall@5:     {recall_at_k[4]:.4f}")
 print(f"Recall@10:    {recall_at_k[9]:.4f}")
  
-# ── Gráficos comparativos ──────────────────────────────────────────────────
+# ── Gráficos comparativos 
 lightgcn_base_precision = [0.8613, 0.4647, 0.3102, 0.2352, 0.1924,
                             0.1624, 0.1399, 0.1232, 0.1102, 0.1000,
                             0.0916, 0.0844, 0.0783, 0.0732, 0.0688,

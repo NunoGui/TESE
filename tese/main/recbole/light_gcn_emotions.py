@@ -7,13 +7,13 @@ from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 import matplotlib.pyplot as plt
 import random
  
-# ── Reprodutibilidade ──────────────────────────────────────────────────────
+# ── Reprodutibilidade 
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
  
-# ── Carregar dados ─────────────────────────────────────────────────────────
+# ── Carregar dados 
 print("A carregar dados...")
 ratings = pd.read_csv('ratings_full.csv')
  
@@ -37,7 +37,7 @@ n_images = ratings['image_idx'].nunique()
 n_emo    = len(EMO_COLS)
 print(f"Utilizadores: {n_users} | Imagens: {n_images} | Ratings: {len(ratings)}")
  
-# ── Split 12/3/17 por utilizador ───────────────────────────────────────────
+# ── Split 12/3/17 por utilizador 
 print("\nA construir split 12/3 + 17 random...")
  
 train_data = []
@@ -69,7 +69,7 @@ train_df = pd.concat(train_data).reset_index(drop=True)
 print(f"Treino: {len(train_df)} interações")
 print(f"Teste:  {len(test_data)} entradas")
  
-# ── Perfis emocionais por utilizador e imagem ──────────────────────────────
+# ── Perfis emocionais por utilizador e imagem 
 # Agrega os scores emocionais médios por user e por image a partir do treino
 user_emo_profile  = train_df.groupby('user_idx')[EMO_COLS].mean()
 image_emo_profile = train_df.groupby('image_idx')[EMO_COLS].mean()
@@ -86,7 +86,7 @@ for idx, row in image_emo_profile.iterrows():
 user_emo_tensor  = torch.tensor(user_emo_matrix,  dtype=torch.float32)
 image_emo_tensor = torch.tensor(image_emo_matrix, dtype=torch.float32)
  
-# ── Modelo LightGCN com emoções ────────────────────────────────────────────
+# ── Modelo LightGCN com emoções 
 class LightGCNEmo(nn.Module):
     def __init__(self, n_users, n_items, emb_dim=64, n_layers=3, n_emo=10):
         super().__init__()
@@ -133,7 +133,7 @@ class LightGCNEmo(nn.Module):
         i = item_embs[items]
         return (u * i).sum(dim=1)
  
-# ── Construir matriz de adjacência ─────────────────────────────────────────
+# ── Construir matriz de adjacência 
 def build_adj(train_df, n_users, n_images):
     users  = torch.tensor(train_df['user_idx'].values,  dtype=torch.long)
     images = torch.tensor(train_df['image_idx'].values, dtype=torch.long) + n_users
@@ -150,7 +150,7 @@ def build_adj(train_df, n_users, n_images):
 print("\nA construir grafo...")
 adj = build_adj(train_df, n_users, n_images)
  
-# ── Treino ─────────────────────────────────────────────────────────────────
+# ── Treino 
 model     = LightGCNEmo(n_users, n_images, emb_dim=64, n_layers=3, n_emo=n_emo)
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 train_pos = train_df[train_df['rating'] == 1].reset_index(drop=True)
@@ -183,7 +183,7 @@ for epoch in range(EPOCHS):
     if (epoch + 1) % 10 == 0:
         print(f"  Epoch {epoch+1:3d} | Loss: {total_loss:.4f}")
  
-# ── Avaliação ──────────────────────────────────────────────────────────────
+# ── Avaliação 
 print("\nA avaliar...")
 model.eval()
 with torch.no_grad():
@@ -229,7 +229,7 @@ print(f"Recall@1:     {recall_at_k[0]:.4f}")
 print(f"Recall@5:     {recall_at_k[4]:.4f}")
 print(f"Recall@10:    {recall_at_k[9]:.4f}")
  
-# ── Gráficos comparativos ──────────────────────────────────────────────────
+# ── Gráficos comparativos 
 # Resultados do LightGCN base (sem emoções) para comparação
 lightgcn_base_precision = [0.8613, 0.4647, 0.3102, 0.2352, 0.1924,
                             0.1624, 0.1399, 0.1232, 0.1102, 0.1000,

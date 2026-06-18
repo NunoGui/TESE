@@ -7,13 +7,13 @@ from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import random
  
-# ── Reprodutibilidade ──────────────────────────────────────────────────────
+# ── Reprodutibilidade 
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
  
-# ── Carregar dados ─────────────────────────────────────────────────────────
+# ── Carregar dados 
 print("A carregar dados...")
 ratings = pd.read_csv('ratings_full.csv')
  
@@ -27,7 +27,7 @@ n_users  = ratings['user_idx'].nunique()
 n_images = ratings['image_idx'].nunique()
 print(f"Utilizadores: {n_users} | Imagens: {n_images} | Ratings: {len(ratings)}")
  
-# ── Split 12/3/17 por utilizador ───────────────────────────────────────────
+# ── Split 12/3/17 por utilizador 
 print("\nA construir split 12/3 + 17 random...")
  
 train_data = []
@@ -60,7 +60,7 @@ train_df = pd.concat(train_data).reset_index(drop=True)
 print(f"Treino: {len(train_df)} interações")
 print(f"Teste:  {len(test_data)} entradas (3 por utilizador)")
  
-# ── Modelo LightGCN ────────────────────────────────────────────────────────
+# ── Modelo LightGCN 
 class LightGCN(nn.Module):
     def __init__(self, n_users, n_items, emb_dim=64, n_layers=3):
         super().__init__()
@@ -88,7 +88,7 @@ class LightGCN(nn.Module):
         i = item_embs[items]
         return (u * i).sum(dim=1)
  
-# ── Construir matriz de adjacência normalizada ─────────────────────────────
+# ── Construir matriz de adjacência normalizada 
 def build_adj(train_df, n_users, n_images):
     users  = torch.tensor(train_df['user_idx'].values,  dtype=torch.long)
     images = torch.tensor(train_df['image_idx'].values, dtype=torch.long) + n_users
@@ -111,7 +111,7 @@ def build_adj(train_df, n_users, n_images):
 print("\nA construir grafo...")
 adj = build_adj(train_df, n_users, n_images)
  
-# ── Treino BPR ─────────────────────────────────────────────────────────────
+# ── Treino BPR 
 model     = LightGCN(n_users, n_images, emb_dim=64, n_layers=3)
 optimizer = optim.Adam(model.parameters(), lr=0.001)
  
@@ -148,7 +148,7 @@ for epoch in range(EPOCHS):
     if (epoch + 1) % 10 == 0:
         print(f"  Epoch {epoch+1:3d} | Loss: {total_loss:.4f}")
  
-# ── Avaliação Precision@k e Recall@k ──────────────────────────────────────
+# ── Avaliação Precision@k e Recall@k 
 print("\nA avaliar...")
 model.eval()
 with torch.no_grad():
@@ -195,7 +195,7 @@ print(f"Recall@1:     {recall_at_k[0]:.4f}")
 print(f"Recall@5:     {recall_at_k[4]:.4f}")
 print(f"Recall@10:    {recall_at_k[9]:.4f}")
  
-# ── Gráficos ───────────────────────────────────────────────────────────────
+# ── Gráficos 
 ks = list(range(1, K_MAX + 1))
  
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
