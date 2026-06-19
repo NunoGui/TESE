@@ -17,13 +17,14 @@ PATH_RATINGS  = "data/ratings_full.csv"
 EMBEDDING_DIM = 64
 N_EPOCHS      = 100
 BATCH_SIZE    = 1024
-N_TRAIN       = 12
-N_TEST_MIN    = 20
-SEED          = 42
+K_FOLDS       = 5
+TOTAL_ITEMS   = 3084
+MIN_TEST      = 20
+BASE_SEED     = 42
 N_TRIALS      = 20
  
-np.random.seed(SEED)
-torch.manual_seed(SEED)
+np.random.seed(BASE_SEED)
+torch.manual_seed(BASE_SEED)
 device = torch.device("cpu")
  
 FEATURE_COLS = [
@@ -32,30 +33,16 @@ FEATURE_COLS = [
 ]
  
 # ──────────────────────────────────────────────
-# 1. Carregar e preparar dados
+# 1. Carregar dados
 # ──────────────────────────────────────────────
 print("A carregar dados...")
 ratings = pd.read_csv(PATH_RATINGS).fillna(0)
 ratings = ratings.rename(columns={"user_id": "user", "image_id": "item"})
 ratings = split.remove_degenerate_users(ratings)
- 
-user_ids = sorted(ratings['user'].unique())
-item_ids = sorted(ratings['item'].unique())
-user2idx = {u: i for i, u in enumerate(user_ids)}
-item2idx = {it: i for i, it in enumerate(item_ids)}
-n_users  = len(user_ids)
-n_items  = len(item_ids)
- 
-ratings['user_idx'] = ratings['user'].map(user2idx)
-ratings['item_idx'] = ratings['item'].map(item2idx)
- 
-print("\nA dividir dados treino/teste...")
-train_df, test_df = split.split_user_data(ratings, FEATURE_COLS, N_TRAIN, N_TEST_MIN, SEED)
-train_pos = train_df[train_df['rating'] == 1].copy()
-print(f"  Treino positivos: {len(train_pos)} | Teste: {len(test_df)}")
+print(f"  Users: {ratings['user'].nunique()} | Items: {ratings['item'].nunique()}")
  
 # ──────────────────────────────────────────────
-# 2. Construir matriz de adjacência
+# 2. Funções auxiliares
 # ──────────────────────────────────────────────
 def build_adj_matrix(train_pos, n_users, n_items):
     user_indices = train_pos['user_idx'].values
@@ -75,11 +62,6 @@ def build_adj_matrix(train_pos, n_users, n_items):
     values  = torch.FloatTensor(adj.data)
     return torch.sparse_coo_tensor(indices, values, torch.Size([N, N])).to(device)
  
-adj_matrix = build_adj_matrix(train_pos, n_users, n_items)
- 
-train_pos_set = train_pos.groupby('user_idx')['item_idx'].apply(set).to_dict()
-train_pairs   = list(zip(train_pos['user_idx'].values, train_pos['item_idx'].values))
- 
 def sample_negative(user_idx, train_pos_set, n_items):
     while True:
         neg = np.random.randint(0, n_items)
@@ -87,61 +69,84 @@ def sample_negative(user_idx, train_pos_set, n_items):
             return neg
  
 # ──────────────────────────────────────────────
-# 3. Função de treino e avaliação
+# 3. Treino e avaliação com kfold5
 # ──────────────────────────────────────────────
-def train_and_evaluate(lr, weight_decay, n_layers):
-    torch.manual_seed(SEED)
-    np.random.seed(SEED)
+def train_and_evaluate_kfold(lr, weight_decay, n_layers):
+    ndcg_folds = []
  
-    model     = LightGCN(n_users, n_items, EMBEDDING_DIM, n_layers).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN_TEST, BASE_SEED):
+        torch.manual_seed(BASE_SEED + k)
+        np.random.seed(BASE_SEED + k)
  
-    for epoch in range(1, N_EPOCHS + 1):
-        model.train()
-        pairs = train_pairs.copy()
-        np.random.shuffle(pairs)
+        train_pos = train_df[train_df['rating'] == 1].copy()
  
-        for i in range(0, len(pairs), BATCH_SIZE):
-            batch     = pairs[i:i + BATCH_SIZE]
-            users     = torch.LongTensor([p[0] for p in batch]).to(device)
-            pos_items = torch.LongTensor([p[1] for p in batch]).to(device)
-            neg_items = torch.LongTensor([
-                sample_negative(p[0], train_pos_set, n_items) for p in batch
-            ]).to(device)
+        fold_user_ids = sorted(train_df['user'].unique())
+        fold_item_ids = sorted(ratings['item'].unique())
+        fold_user2idx = {u: i for i, u in enumerate(fold_user_ids)}
+        fold_item2idx = {it: i for i, it in enumerate(fold_item_ids)}
+        fold_n_users  = len(fold_user_ids)
+        fold_n_items  = len(fold_item_ids)
  
-            optimizer.zero_grad()
+        train_pos = train_pos.copy()
+        train_pos['user_idx'] = train_pos['user'].map(fold_user2idx)
+        train_pos['item_idx'] = train_pos['item'].map(fold_item2idx)
+        train_pos = train_pos.dropna(subset=['user_idx', 'item_idx'])
+        train_pos['user_idx'] = train_pos['user_idx'].astype(int)
+        train_pos['item_idx'] = train_pos['item_idx'].astype(int)
+ 
+        adj_matrix    = build_adj_matrix(train_pos, fold_n_users, fold_n_items)
+        train_pos_set = train_pos.groupby('user_idx')['item_idx'].apply(set).to_dict()
+        train_pairs   = list(zip(train_pos['user_idx'].values, train_pos['item_idx'].values))
+ 
+        model     = LightGCN(fold_n_users, fold_n_items, EMBEDDING_DIM, n_layers).to(device)
+        optimizer = optim.Adam(model.parameters(), lr=lr)
+ 
+        for epoch in range(1, N_EPOCHS + 1):
+            model.train()
+            pairs = train_pairs.copy()
+            np.random.shuffle(pairs)
+            for i in range(0, len(pairs), BATCH_SIZE):
+                batch     = pairs[i:i + BATCH_SIZE]
+                users     = torch.LongTensor([p[0] for p in batch]).to(device)
+                pos_items = torch.LongTensor([p[1] for p in batch]).to(device)
+                neg_items = torch.LongTensor([
+                    sample_negative(p[0], train_pos_set, fold_n_items) for p in batch
+                ]).to(device)
+                optimizer.zero_grad()
+                user_emb, item_emb = model(adj_matrix)
+                loss = model.bpr_loss(user_emb, item_emb, users, pos_items, neg_items, weight_decay)
+                loss.backward()
+                optimizer.step()
+ 
+        model.eval()
+        with torch.no_grad():
             user_emb, item_emb = model(adj_matrix)
-            loss = model.bpr_loss(user_emb, item_emb, users, pos_items, neg_items, weight_decay)
-            loss.backward()
-            optimizer.step()
+            user_emb = user_emb.cpu().numpy()
+            item_emb = item_emb.cpu().numpy()
  
-    model.eval()
-    with torch.no_grad():
-        user_emb, item_emb = model(adj_matrix)
-        user_emb = user_emb.cpu().numpy()
-        item_emb = item_emb.cpu().numpy()
+        ndcg_list = []
+        for user in test_df['user'].unique():
+            user_test  = test_df[test_df['user'] == user]
+            test_items = user_test['item'].tolist()
+            relevant   = user_test[user_test['rating'] == 1]['item'].tolist()
+            if len(relevant) == 0 or user not in fold_user2idx:
+                continue
+            u_idx             = fold_user2idx[user]
+            test_item_indices = [fold_item2idx[it] for it in test_items if it in fold_item2idx]
+            test_items_mapped = [it for it in test_items if it in fold_item2idx]
+            if len(test_item_indices) == 0:
+                continue
+            scores       = item_emb[test_item_indices].dot(user_emb[u_idx])
+            ranked_idx   = np.argsort(-scores)
+            ranked_items = [test_items_mapped[i] for i in ranked_idx[:10]]
+            ndcg_list.append(evaluation.ndcg_at_k(ranked_items, relevant, 10))
  
-    ndcg_list = []
-    for user in test_df['user'].unique():
-        user_test  = test_df[test_df['user'] == user]
-        test_items = user_test['item'].tolist()
-        relevant   = user_test[user_test['rating'] == 1]['item'].tolist()
-        if len(relevant) == 0 or user not in user2idx:
-            continue
-        u_idx             = user2idx[user]
-        test_item_indices = [item2idx[it] for it in test_items if it in item2idx]
-        test_items_mapped = [it for it in test_items if it in item2idx]
-        if len(test_item_indices) == 0:
-            continue
-        scores       = item_emb[test_item_indices].dot(user_emb[u_idx])
-        ranked_idx   = np.argsort(-scores)
-        ranked_items = [test_items_mapped[i] for i in ranked_idx[:10]]
-        ndcg_list.append(evaluation.ndcg_at_k(ranked_items, relevant, 10))
+        ndcg_folds.append(np.mean(ndcg_list))
  
-    return round(np.mean(ndcg_list), 4)
+    return round(np.mean(ndcg_folds), 4)
  
 # ──────────────────────────────────────────────
-# 4. Optuna — objetivo
+# 4. Optuna TPE
 # ──────────────────────────────────────────────
 trial_results = []
  
@@ -150,7 +155,7 @@ def objective(trial):
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
     n_layers     = trial.suggest_int("n_layers", 1, 4)
  
-    ndcg = train_and_evaluate(lr, weight_decay, n_layers)
+    ndcg = train_and_evaluate_kfold(lr, weight_decay, n_layers)
  
     trial_results.append({
         "trial":        trial.number + 1,
@@ -163,36 +168,32 @@ def objective(trial):
     print(f"Trial {trial.number+1:2d}/{N_TRIALS} | lr={round(lr,5)} | wd={round(weight_decay,5)} | layers={n_layers} | NDCG@10={ndcg}")
     return ndcg
  
-# ──────────────────────────────────────────────
-# 5. Correr Optuna
-# ──────────────────────────────────────────────
-print(f"\nA iniciar Optuna TPE Search ({N_TRIALS} trials)...")
+print(f"\nA iniciar Optuna TPE Search ({N_TRIALS} trials x {K_FOLDS} folds)...")
 print("="*60)
  
-sampler = optuna.samplers.TPESampler(seed=SEED)
+sampler = optuna.samplers.TPESampler(seed=BASE_SEED)
 study   = optuna.create_study(direction="maximize", sampler=sampler)
 study.optimize(objective, n_trials=N_TRIALS)
  
 # ──────────────────────────────────────────────
-# 6. Resultados
+# 5. Resultados
 # ──────────────────────────────────────────────
-best = study.best_params
+best      = study.best_params
 best_ndcg = study.best_value
  
 print("\n" + "="*60)
-print("RESULTADOS DO TUNING")
+print("RESULTADOS DO TUNING (kfold5)")
 print("="*60)
  
 results_df = pd.DataFrame(trial_results).sort_values("ndcg@10", ascending=False)
 print(results_df.to_string(index=False))
  
-print(f"\n── Melhores hiperparâmetros (Optuna TPE) ──")
+print(f"\n── Melhores hiperparâmetros (Optuna TPE + kfold5) ──")
 print(f"  lr:           {best['lr']:.6f}")
 print(f"  weight_decay: {best['weight_decay']:.6f}")
 print(f"  n_layers:     {best['n_layers']}")
 print(f"  NDCG@10:      {best_ndcg}")
  
-# Guardar
 os.makedirs("results", exist_ok=True)
 results_df.to_csv("results/lightgcn_tuning.csv", index=False)
 with open("results/lightgcn_best_params.json", "w") as f:

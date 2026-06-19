@@ -70,3 +70,43 @@ plt.tight_layout()
 plt.savefig("results/comparison_plot.png", dpi=150, bbox_inches='tight')
 plt.show()
 print("Gráfico guardado em results/comparison_plot.png")
+ 
+# ──────────────────────────────────────────────
+# Gráfico de barras — métricas fixas
+# ──────────────────────────────────────────────
+import glob
+ 
+fixed_files = glob.glob("results/fixed_metrics_*.csv")
+if fixed_files:
+    fixed_dfs = [pd.read_csv(f) for f in sorted(fixed_files)]
+    fixed_df  = pd.concat(fixed_dfs, ignore_index=True)
+ 
+    metrics_fixed = ["Precision@1", "MRR@10", "NDCG@10", "HitRate@10"]
+    # MRR@10 não está no CSV directamente — usar top10 do mrr como proxy
+    # Só plotar as que existem
+    available = [m for m in metrics_fixed if m in fixed_df.columns]
+ 
+    x     = np.arange(len(available))
+    width = 0.35
+ 
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for i, (_, row) in enumerate(fixed_df.iterrows()):
+        model  = row['model']
+        style  = model_styles.get(model, {"color": None})
+        values = [row[m] for m in available]
+        ax.bar(x + i * width, values, width, label=name_mapping.get(model, model),
+               color=style["color"])
+ 
+    ax.set_xlabel("Métrica", fontsize=12)
+    ax.set_ylabel("Valor", fontsize=12)
+    ax.set_title("Comparação de Métricas Fixas", fontsize=13)
+    ax.set_xticks(x + width / 2)
+    ax.set_xticklabels(available, fontsize=11)
+    ax.set_ylim(0, 1.1)
+    ax.legend(fontsize=10)
+    ax.grid(axis='y', alpha=0.5)
+ 
+    plt.tight_layout()
+    plt.savefig("results/fixed_metrics_comparison.png", dpi=150, bbox_inches='tight')
+    plt.show()
+    print("Gráfico de barras guardado em results/fixed_metrics_comparison.png")

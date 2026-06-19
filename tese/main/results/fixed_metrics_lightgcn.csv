@@ -1,0 +1,2 @@
+model,Precision@1,Recall@10,HitRate@10,NDCG@10
+LightGCN,0.8146,0.9961,0.9982,0.9007
