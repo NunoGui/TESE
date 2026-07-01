@@ -12,7 +12,7 @@ import split
 import evaluation
 from lightgcn_model import LightGCN
  
-# ── Configuração
+
 PATH_RATINGS  = "data/ratings_full.csv"
 EMBEDDING_DIM = 64
 N_EPOCHS      = 100

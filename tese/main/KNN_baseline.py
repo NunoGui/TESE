@@ -6,10 +6,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 import split
 import evaluation
  
-# ── Configuração
 PATH_RATINGS = "data/ratings_full.csv"
-K          = 10   # número de vizinhos
-TOP_K      = 10   # tamanho da lista de recomendações
+K          = 10   
+TOP_K      = 10   
 K_FOLDS    = 5
 TOTAL_ITEMS = 1300
 MIN_TEST   = 20
