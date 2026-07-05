@@ -17,7 +17,7 @@ N_EPOCHS      = 100
 BATCH_SIZE    = 1024
 TOP_K         = 10
 K_FOLDS       = 5
-TOTAL_ITEMS   = 1300
+TOTAL_ITEMS   = 3084
 MIN_TEST      = 20
 BASE_SEED     = 42
  
