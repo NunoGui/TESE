@@ -1,2 +1,2 @@
-model,Precision@1,Recall@10,HitRate@10,NDCG@10
-KNN_All,0.8307,0.9247,0.9831,0.8777
+model,Precision@1,Recall@10,HitRate@10,NDCG@10,MRR@10
+KNN_All,0.8307,0.9247,0.9831,0.8777,0.9013

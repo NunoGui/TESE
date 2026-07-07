@@ -32,8 +32,8 @@ FEATURE_COLS = [
     "happiness", "sadness", "anger", "fear", "surprise", "disgust", "neutral"
 ]
 
-# ── Carregar melhores hiperparâmetros do tuning NDCG
-PARAMS_PATH = "results/lightgcn_best_params.json"
+# ── Carregar melhores hiperparâmetros do tuning MRR
+PARAMS_PATH = "results/lightgcn_best_params_mrr.json"
 if os.path.exists(PARAMS_PATH):
     with open(PARAMS_PATH, "r") as f:
         best_params = json.load(f)
@@ -42,10 +42,10 @@ if os.path.exists(PARAMS_PATH):
     N_LAYERS     = best_params["n_layers"]
     print(f"Hiperparâmetros carregados de {PARAMS_PATH}")
 else:
-    print("AVISO: lightgcn_best_params.json não encontrado. A usar valores default.")
-    LR           = 0.004066
-    WEIGHT_DECAY = 0.001127
-    N_LAYERS     = 4
+    print("AVISO: lightgcn_best_params_mrr.json não encontrado. A usar valores default.")
+    LR           = 0.001
+    WEIGHT_DECAY = 0.01
+    N_LAYERS     = 3
 
 print(f"  lr={round(LR,6)} | weight_decay={round(WEIGHT_DECAY,6)} | n_layers={N_LAYERS}")
 print(f"  Max epochs: {N_EPOCHS} | Patience: {PATIENCE}")
@@ -86,15 +86,15 @@ def sample_negative(user_idx, train_pos_set, n_items):
         if neg not in train_pos_set.get(user_idx, set()):
             return neg
 
-def evaluate_ndcg(model, adj_matrix, test_df, fold_user2idx, fold_item2idx):
-    """Avalia o modelo e retorna NDCG@10 médio para early stopping."""
+def evaluate_mrr(model, adj_matrix, test_df, fold_user2idx, fold_item2idx):
+    """Avalia o modelo e retorna MRR@10 médio para early stopping."""
     model.eval()
     with torch.no_grad():
         user_emb, item_emb = model(adj_matrix)
         user_emb = user_emb.cpu().numpy()
         item_emb = item_emb.cpu().numpy()
 
-    ndcg_list = []
+    mrr_list = []
     for user in test_df['user'].unique():
         user_test  = test_df[test_df['user'] == user]
         test_items = user_test['item'].tolist()
@@ -109,9 +109,11 @@ def evaluate_ndcg(model, adj_matrix, test_df, fold_user2idx, fold_item2idx):
         scores       = item_emb[test_item_indices].dot(user_emb[u_idx])
         ranked_idx   = np.argsort(-scores)
         ranked_items = [test_items_mapped[i] for i in ranked_idx[:10]]
-        ndcg_list.append(evaluation.ndcg_at_k(ranked_items, relevant, 10))
+        mrr_curve    = evaluation.mrr_curve(ranked_items, relevant)
+        mrr10        = mrr_curve[9] if len(mrr_curve) >= 10 else mrr_curve[-1]
+        mrr_list.append(mrr10)
 
-    return round(np.mean(ndcg_list), 4) if ndcg_list else 0.0
+    return round(np.mean(mrr_list), 4) if mrr_list else 0.0
 
 # ──────────────────────────────────────────────
 # 3. Loop kfold
@@ -157,7 +159,7 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
     optimizer = optim.Adam(model.parameters(), lr=LR)
 
     # ── Early stopping
-    best_ndcg        = 0.0
+    best_mrr         = 0.0
     best_epoch       = 0
     no_improve       = 0
     best_model_state = None
@@ -185,10 +187,11 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
             total_loss += loss.item()
             n_batches  += 1
 
+        # Avaliar a cada 5 epochs para early stopping
         if epoch % 5 == 0:
-            current_ndcg = evaluate_ndcg(model, adj_matrix, test_df, fold_user2idx, fold_item2idx)
-            if current_ndcg > best_ndcg:
-                best_ndcg        = current_ndcg
+            current_mrr = evaluate_mrr(model, adj_matrix, test_df, fold_user2idx, fold_item2idx)
+            if current_mrr > best_mrr:
+                best_mrr         = current_mrr
                 best_epoch       = epoch
                 no_improve       = 0
                 best_model_state = copy.deepcopy(model.state_dict())
@@ -196,7 +199,7 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
                 no_improve += 5
 
             if epoch % 25 == 0:
-                print(f"    Epoch {epoch:3d}/{N_EPOCHS} | Loss: {total_loss/n_batches:.4f} | NDCG@10: {current_ndcg:.4f} | Best: {best_ndcg:.4f} (ep {best_epoch})")
+                print(f"    Epoch {epoch:3d}/{N_EPOCHS} | Loss: {total_loss/n_batches:.4f} | MRR@10: {current_mrr:.4f} | Best: {best_mrr:.4f} (ep {best_epoch})")
 
             if no_improve >= PATIENCE:
                 print(f"    Early stopping na epoch {epoch} — melhor epoch: {best_epoch}")
@@ -204,7 +207,7 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
 
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
-        print(f"    Melhor modelo restaurado da epoch {best_epoch} com NDCG@10={best_ndcg:.4f}")
+        print(f"    Melhor modelo restaurado da epoch {best_epoch} com MRR@10={best_mrr:.4f}")
 
     # ── Avaliação final
     model.eval()
@@ -270,7 +273,7 @@ mean_f1   = acc_f1   / K_FOLDS
 mean_mrr  = acc_mrr  / K_FOLDS
 
 print("\n" + "="*50)
-print("LightGCN (Early Stopping) — Resultados Finais (kfold5)")
+print("LightGCN MRR (Early Stopping) — Resultados Finais (kfold5)")
 print("="*50)
 print("\nPrecision@k:") ; print(mean_prec.to_string(index=False))
 print("\nRecall@k:")    ; print(mean_rec.to_string(index=False))
@@ -286,25 +289,25 @@ print(f"  MRR@10:       {round(np.mean(mrr10_all), 4)}")
 
 # Guardar resultados
 os.makedirs("results", exist_ok=True)
-mean_prec_s = mean_prec.copy(); mean_prec_s.insert(0, 'model', 'LightGCN')
-mean_rec_s  = mean_rec.copy();  mean_rec_s.insert(0,  'model', 'LightGCN')
-mean_f1_s   = mean_f1.copy();   mean_f1_s.insert(0,   'model', 'LightGCN')
-mean_mrr_s  = mean_mrr.copy();  mean_mrr_s.insert(0,  'model', 'LightGCN')
+mean_prec_s = mean_prec.copy(); mean_prec_s.insert(0, 'model', 'LightGCN_MRR')
+mean_rec_s  = mean_rec.copy();  mean_rec_s.insert(0,  'model', 'LightGCN_MRR')
+mean_f1_s   = mean_f1.copy();   mean_f1_s.insert(0,   'model', 'LightGCN_MRR')
+mean_mrr_s  = mean_mrr.copy();  mean_mrr_s.insert(0,  'model', 'LightGCN_MRR')
 
-mean_prec_s.to_csv("results/precision_lightgcn.csv", index=False)
-mean_rec_s.to_csv("results/recall_lightgcn.csv",     index=False)
-mean_f1_s.to_csv("results/f1_lightgcn.csv",          index=False)
-mean_mrr_s.to_csv("results/mrr_lightgcn.csv",        index=False)
+mean_prec_s.to_csv("results/precision_lightgcn_mrr.csv", index=False)
+mean_rec_s.to_csv("results/recall_lightgcn_mrr.csv",     index=False)
+mean_f1_s.to_csv("results/f1_lightgcn_mrr.csv",          index=False)
+mean_mrr_s.to_csv("results/mrr_lightgcn_mrr.csv",        index=False)
 
 fixed_metrics = pd.DataFrame([{
-    "model":        "LightGCN",
+    "model":        "LightGCN_MRR",
     "Precision@1":  round(np.mean(precision1_all), 4),
     "Recall@10":    round(np.mean(recall10_all), 4),
     "HitRate@10":   round(np.mean(hit10_all), 4),
     "NDCG@10":      round(np.mean(ndcg10_all), 4),
     "MRR@10":       round(np.mean(mrr10_all), 4)
 }])
-fixed_metrics.to_csv("results/fixed_metrics_lightgcn.csv", index=False)
+fixed_metrics.to_csv("results/fixed_metrics_lightgcn_mrr.csv", index=False)
 
 print("\nResultados guardados em results/")
 print("Done!")

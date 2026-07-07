@@ -12,13 +12,13 @@ import copy
 
 import split
 import evaluation
-from hetero_gat_model import HeteroGAT
+from hetero_gatV2_model import HeteroGATv2
 
 # ── Configuração
 PATH_RATINGS = "../data/ratings_full.csv"
 PATH_USERS   = "../data/users.csv"
 HIDDEN_DIM   = 64
-N_EPOCHS     = 500   # máximo — early stopping para antes
+N_EPOCHS     = 500   # máximo de epochs: early stopping vai parar antes
 PATIENCE     = 30    # epochs sem melhoria antes de parar
 BATCH_SIZE   = 1024
 TOP_K        = 10
@@ -37,7 +37,7 @@ EMO_COLS  = ['valence', 'arousal', 'dominance',
 DEMO_COLS = ['age_group', 'populational_aff', 'gender', 'education', 'country']
 
 # ── Carregar melhores hiperparâmetros do tuning
-PARAMS_PATH = "../results/hetero_gat_best_params.json"
+PARAMS_PATH = "../results/hetero_gatv2_best_params.json"
 if os.path.exists(PARAMS_PATH):
     with open(PARAMS_PATH, "r") as f:
         best_params = json.load(f)
@@ -48,10 +48,10 @@ if os.path.exists(PARAMS_PATH):
     print(f"Hiperparâmetros carregados de {PARAMS_PATH}")
 else:
     print("A usar hiperparâmetros default.")
-    LR           = 0.001
-    WEIGHT_DECAY = 0.01
-    N_LAYERS     = 3
-    N_HEADS      = 8
+    LR           = 0.017
+    WEIGHT_DECAY = 0.0001
+    N_LAYERS     = 2
+    N_HEADS      = 4
 
 print(f"  lr={round(LR,6)} | weight_decay={round(WEIGHT_DECAY,6)} | n_layers={N_LAYERS} | n_heads={N_HEADS}")
 print(f"  Max epochs: {N_EPOCHS} | Patience: {PATIENCE}")
@@ -75,7 +75,7 @@ image_features = ratings.groupby('item')[EMO_COLS].mean()
 image_feat_dim = len(EMO_COLS)
 
 print(f"  Users: {ratings['user'].nunique()} | Items: {ratings['item'].nunique()}")
-print(f"  Features demográficas (one-hot): {user_feat_dim}")
+print(f"  Features user: {user_feat_dim} | Features image: {image_feat_dim}")
 
 # ──────────────────────────────────────────────
 # 2. Construir HeteroData
@@ -206,7 +206,7 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
     edge_attr_dict  = {k: v.edge_attr  for k, v in graph.edge_items() if hasattr(v, 'edge_attr')}
     x_dict = {k: v.x for k, v in graph.node_items()}
 
-    model = HeteroGAT(
+    model = HeteroGATv2(
         user_feat_dim=user_feat_dim,
         image_feat_dim=image_feat_dim,
         edge_feat_dim=len(EMO_COLS),
@@ -218,9 +218,9 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
     optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
 
     # ── Early stopping
-    best_mrr         = 0.0
-    best_epoch       = 0
-    no_improve       = 0
+    best_ndcg      = 0.0
+    best_epoch     = 0
+    no_improve     = 0
     best_model_state = None
 
     for epoch in range(1, N_EPOCHS + 1):
@@ -246,11 +246,12 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
             total_loss += loss.item()
             n_batches  += 1
 
+        # Avaliar a cada 5 epochs para early stopping
         if epoch % 5 == 0:
-            current_mrr = evaluate_model(model, test_df, user2idx, item2idx,
-                                         x_dict, edge_index_dict, edge_attr_dict)
-            if current_mrr > best_mrr:
-                best_mrr         = current_mrr
+            current_ndcg = evaluate_model(model, test_df, user2idx, item2idx,
+                                          x_dict, edge_index_dict, edge_attr_dict)
+            if current_ndcg > best_ndcg:
+                best_ndcg        = current_ndcg
                 best_epoch       = epoch
                 no_improve       = 0
                 best_model_state = copy.deepcopy(model.state_dict())
@@ -258,15 +259,16 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
                 no_improve += 5
 
             if epoch % 25 == 0:
-                print(f"    Epoch {epoch:3d}/{N_EPOCHS} | Loss: {total_loss/n_batches:.4f} | MRR@10: {current_mrr:.4f} | Best: {best_mrr:.4f} (ep {best_epoch})")
+                print(f"    Epoch {epoch:3d}/{N_EPOCHS} | Loss: {total_loss/n_batches:.4f} | NDCG@10: {current_ndcg:.4f} | Best: {best_ndcg:.4f} (ep {best_epoch})")
 
             if no_improve >= PATIENCE:
                 print(f"    Early stopping na epoch {epoch} — melhor epoch: {best_epoch}")
                 break
 
+    # Restaurar melhor modelo
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
-        print(f"    Melhor modelo restaurado da epoch {best_epoch} com MRR@10={best_mrr:.4f}")
+        print(f"    Melhor modelo restaurado da epoch {best_epoch} com NDCG@10={best_ndcg:.4f}")
 
     # ── Avaliação final
     model.eval()
@@ -332,7 +334,7 @@ mean_f1   = acc_f1   / K_FOLDS
 mean_mrr  = acc_mrr  / K_FOLDS
 
 print("\n" + "="*50)
-print("HeteroGAT (Early Stopping) — Resultados Finais (kfold5)")
+print("HeteroGATv2 (Early Stopping) — Resultados Finais (kfold5)")
 print("="*50)
 print("\nPrecision@k:") ; print(mean_prec.to_string(index=False))
 print("\nRecall@k:")    ; print(mean_rec.to_string(index=False))
@@ -348,25 +350,25 @@ print(f"  MRR@10:       {round(np.mean(mrr10_all), 4)}")
 
 # Guardar resultados
 os.makedirs("../results", exist_ok=True)
-mean_prec_s = mean_prec.copy(); mean_prec_s.insert(0, 'model', 'HeteroGAT')
-mean_rec_s  = mean_rec.copy();  mean_rec_s.insert(0,  'model', 'HeteroGAT')
-mean_f1_s   = mean_f1.copy();   mean_f1_s.insert(0,   'model', 'HeteroGAT')
-mean_mrr_s  = mean_mrr.copy();  mean_mrr_s.insert(0,  'model', 'HeteroGAT')
+mean_prec_s = mean_prec.copy(); mean_prec_s.insert(0, 'model', 'HeteroGATv2')
+mean_rec_s  = mean_rec.copy();  mean_rec_s.insert(0,  'model', 'HeteroGATv2')
+mean_f1_s   = mean_f1.copy();   mean_f1_s.insert(0,   'model', 'HeteroGATv2')
+mean_mrr_s  = mean_mrr.copy();  mean_mrr_s.insert(0,  'model', 'HeteroGATv2')
 
-mean_prec_s.to_csv("../results/precision_heterogat.csv", index=False)
-mean_rec_s.to_csv("../results/recall_heterogat.csv",     index=False)
-mean_f1_s.to_csv("../results/f1_heterogat.csv",          index=False)
-mean_mrr_s.to_csv("../results/mrr_heterogat.csv",        index=False)
+mean_prec_s.to_csv("../results/precision_heterogatv2.csv", index=False)
+mean_rec_s.to_csv("../results/recall_heterogatv2.csv",     index=False)
+mean_f1_s.to_csv("../results/f1_heterogatv2.csv",          index=False)
+mean_mrr_s.to_csv("../results/mrr_heterogatv2.csv",        index=False)
 
 fixed_metrics = pd.DataFrame([{
-    "model":        "HeteroGAT",
+    "model":        "HeteroGATv2",
     "Precision@1":  round(np.mean(precision1_all), 4),
     "Recall@10":    round(np.mean(recall10_all), 4),
     "HitRate@10":   round(np.mean(hit10_all), 4),
     "NDCG@10":      round(np.mean(ndcg10_all), 4),
     "MRR@10":       round(np.mean(mrr10_all), 4)
 }])
-fixed_metrics.to_csv("../results/fixed_metrics_heterogat.csv", index=False)
+fixed_metrics.to_csv("../results/fixed_metrics_heterogatv2.csv", index=False)
 
 print("\nResultados guardados em results/")
 print("Done!")
