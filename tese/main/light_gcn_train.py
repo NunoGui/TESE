@@ -127,6 +127,8 @@ precision1_all, recall10_all, hit10_all, ndcg10_all, mrr10_all = [], [], [], [],
 
 print(f"\nA iniciar kfold ({K_FOLDS} folds)...")
 
+all_recommendations = []
+
 for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN_TEST, BASE_SEED):
     print(f"\n  Fold {k+1}/{K_FOLDS}...")
 
@@ -236,6 +238,16 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
         ranked_idx   = np.argsort(-scores)
         ranked_items = [test_items_mapped[i] for i in ranked_idx[:TOP_K]]
 
+        ranked_scores = scores[ranked_idx[:TOP_K]]
+        for rank, (item_id, sc) in enumerate(zip(ranked_items, ranked_scores), start=1):
+            all_recommendations.append({
+                "fold": k,
+                "user": user,
+                "rank": rank,
+                "item": item_id,
+                "score": float(sc)
+            })
+
         precision_list.append(pad(evaluation.precision_curve(ranked_items, relevant), TOP_K))
         recall_list.append(pad(evaluation.recall_curve(ranked_items, relevant), TOP_K))
         f1_list.append(pad(evaluation.f1_curve(ranked_items, relevant), TOP_K))
@@ -295,6 +307,10 @@ mean_prec_s.to_csv("results/precision_lightgcn.csv", index=False)
 mean_rec_s.to_csv("results/recall_lightgcn.csv",     index=False)
 mean_f1_s.to_csv("results/f1_lightgcn.csv",          index=False)
 mean_mrr_s.to_csv("results/mrr_lightgcn.csv",        index=False)
+
+recs_df = pd.DataFrame(all_recommendations)
+recs_df.to_csv("results/recommendations_lightgcn.csv", index=False)
+print(f"Recomendações completas guardadas: {len(recs_df)} linhas")
 
 fixed_metrics = pd.DataFrame([{
     "model":        "LightGCN",

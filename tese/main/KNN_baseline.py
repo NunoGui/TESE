@@ -96,6 +96,8 @@ precision1_all, recall10_all, hit10_all, ndcg10_all, mrr10_all = [], [], [], [],
 
 print(f"\nA iniciar kfold ({K_FOLDS} folds)...")
 
+all_recommendations = []  
+
 for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN_TEST, BASE_SEED):
     print(f"  Fold {k+1}/{K_FOLDS}...", end=" ", flush=True)
 
@@ -121,6 +123,15 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
         # Calcular scores (média dos ratings dos vizinhos)
         scores = get_scores(test_items, k_most_sim, train_df)
         recs   = scores.index.tolist()[:TOP_K]
+        
+        for rank, item_id in enumerate(recs, start=1):
+            all_recommendations.append({
+                "fold": k,
+                "user": user_id,
+                "rank": rank,
+                "item": item_id,
+                "score": scores.loc[item_id]
+            })
 
         precision_list.append(evaluation.precision_curve(recs, relevant)[:TOP_K])
         recall_list.append(evaluation.recall_curve(recs, relevant)[:TOP_K])
@@ -182,6 +193,10 @@ mean_prec_s.to_csv("results/precision_knn.csv", index=False)
 mean_rec_s.to_csv("results/recall_knn.csv",     index=False)
 mean_f1_s.to_csv("results/f1_knn.csv",          index=False)
 mean_mrr_s.to_csv("results/mrr_knn.csv",        index=False)
+
+recs_df = pd.DataFrame(all_recommendations)
+recs_df.to_csv("results/recommendations_knn.csv", index=False)
+print(f"Recomendações completas guardadas: {len(recs_df)} linhas")
 
 fixed_metrics = pd.DataFrame([{
     "model":        "KNN_All",
