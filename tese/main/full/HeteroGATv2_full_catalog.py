@@ -32,6 +32,10 @@ np.random.seed(BASE_SEED)
 torch.manual_seed(BASE_SEED)
 device = torch.device("cpu")
 
+# ── Forçar determinismo total (evitar variação de resultados entre corridas)
+torch.set_num_threads(1)  # BLAS/OpenMP multi-thread pode somar em ordens diferentes entre corridas
+torch.use_deterministic_algorithms(True, warn_only=True)
+
 EMO_COLS  = ['valence', 'arousal', 'dominance',
              'happiness', 'sadness', 'anger', 'fear', 'surprise', 'disgust', 'neutral']
 DEMO_COLS = ['age_group', 'populational_aff', 'gender', 'education', 'country']
@@ -164,10 +168,10 @@ acc_mrr  = pd.DataFrame(0.0, index=range(1), columns=cols)
 
 precision1_all, recall10_all, hit10_all, ndcg10_all, mrr10_all = [], [], [], [], []
 
-print(f"\nAvaliação sobre catálogo completo — kfold ({K_FOLDS} folds)...")
-
 all_diagnostics = []
 all_recommendations = []
+
+print(f"\nAvaliação sobre catálogo completo — kfold ({K_FOLDS} folds)...")
 
 for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN_TEST, BASE_SEED):
     print(f"\n  Fold {k+1}/{K_FOLDS}...")
@@ -262,15 +266,16 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
         user_emb, image_emb = model(x_dict, edge_index_dict, edge_attr_dict)
         user_emb  = user_emb.cpu().numpy()
         image_emb = image_emb.cpu().numpy()
-        
-        train_degree = train_df['item'].value_counts().to_dict()
-        for it, idx in item2idx.items():
-            all_diagnostics.append({
-                "fold": k,
-                "item": it,
-                "train_degree": train_degree.get(it, 0),
-                "embedding_norm": float(np.linalg.norm(image_emb[idx]))
-            })
+
+    # ── Diagnóstico: grau de treino e norma do embedding por imagem
+    train_degree = train_df['item'].value_counts().to_dict()
+    for it, idx in item2idx.items():
+        all_diagnostics.append({
+            "fold": k,
+            "item": it,
+            "train_degree": train_degree.get(it, 0),
+            "embedding_norm": float(np.linalg.norm(image_emb[idx]))
+        })
 
     precision_list, recall_list, f1_list, mrr_list = [], [], [], []
     precision1_list, recall10_list, hit10_list, ndcg10_list, mrr10_list = [], [], [], [], []
@@ -295,8 +300,8 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
         scores            = image_emb[candidate_indices].dot(user_emb[u_idx])
         ranked_idx        = np.argsort(-scores)
         ranked_items      = [candidates[i] for i in ranked_idx[:TOP_K]]
-        
-        ranked_scores = scores[ranked_idx[:TOP_K]]
+        ranked_scores     = scores[ranked_idx[:TOP_K]]
+
         for rank, (item_id, sc) in enumerate(zip(ranked_items, ranked_scores), start=1):
             all_recommendations.append({
                 "fold": k, "user": user, "rank": rank, "item": item_id, "score": float(sc)
@@ -361,7 +366,14 @@ fixed = pd.DataFrame([{
     "MRR@10":       round(np.mean(mrr10_all), 4)
 }])
 fixed.to_csv("../results/fixed_metrics_heterogatv2_full.csv", index=False)
-pd.DataFrame(all_diagnostics).to_csv("../results/diagnostic_heterogatv2_full.csv", index=False)
-pd.DataFrame(all_recommendations).to_csv("../results/recommendations_heterogatv2_full.csv", index=False)
-print("\nResultados guardados em ../results/fixed_metrics_heterogatv2_full.csv")
+
+diag_df = pd.DataFrame(all_diagnostics)
+diag_df.to_csv("../results/diagnostic_heterogatv2_full.csv", index=False)
+
+recs_df = pd.DataFrame(all_recommendations)
+recs_df.to_csv("../results/recommendations_heterogatv2_full.csv", index=False)
+
+print(f"\nDiagnóstico guardado: {len(diag_df)} linhas (grau + norma por imagem/fold)")
+print(f"Recomendações guardadas: {len(recs_df)} linhas")
+print("Resultados guardados em ../results/")
 print("Done!")

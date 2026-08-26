@@ -1,0 +1,2 @@
+model,Precision@1,Recall@10,HitRate@10,NDCG@10,MRR@10
+HeteroGATv2_FullCatalog_Cosine,0.27,0.4578,0.6055,0.3474,0.3647

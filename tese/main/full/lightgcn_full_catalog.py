@@ -30,6 +30,10 @@ np.random.seed(BASE_SEED)
 torch.manual_seed(BASE_SEED)
 device = torch.device("cpu")
 
+# ── Forçar determinismo total (evitar variação de resultados entre corridas)
+torch.set_num_threads(1)  # BLAS/OpenMP multi-thread pode somar em ordens diferentes entre corridas
+torch.use_deterministic_algorithms(True, warn_only=True)
+
 FEATURE_COLS = [
     "rating", "valence", "arousal", "dominance",
     "happiness", "sadness", "anger", "fear", "surprise", "disgust", "neutral"

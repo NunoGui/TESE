@@ -12,7 +12,7 @@ import copy
 
 import split
 import evaluation
-from hetero_gat_model import HeteroGAT
+from hetero_gatV2_model import HeteroGATv2
 
 # ── Configuração
 PATH_RATINGS = "../data/ratings_full.csv"
@@ -40,8 +40,8 @@ EMO_COLS  = ['valence', 'arousal', 'dominance',
              'happiness', 'sadness', 'anger', 'fear', 'surprise', 'disgust', 'neutral']
 DEMO_COLS = ['age_group', 'populational_aff', 'gender', 'education', 'country']
 
-# ── Carregar hiperparâmetros (mesmo ficheiro usado no treino pool-20, hetero_gat_train.py)
-PARAMS_PATH = "../results/hetero_gat_best_params.json"
+# ── Carregar hiperparâmetros
+PARAMS_PATH = "../results/hetero_gatv2_best_params.json"
 if os.path.exists(PARAMS_PATH):
     with open(PARAMS_PATH, "r") as f:
         best_params = json.load(f)
@@ -51,7 +51,7 @@ if os.path.exists(PARAMS_PATH):
     N_HEADS      = best_params["n_heads"]
     print(f"Hiperparâmetros carregados de {PARAMS_PATH}")
 else:
-    LR, WEIGHT_DECAY, N_LAYERS, N_HEADS = 0.001, 0.01, 3, 8
+    LR, WEIGHT_DECAY, N_LAYERS, N_HEADS = 0.017, 0.0001, 2, 4
     print("A usar hiperparâmetros default.")
 
 print(f"  lr={round(LR,6)} | weight_decay={round(WEIGHT_DECAY,6)} | n_layers={N_LAYERS} | n_heads={N_HEADS}")
@@ -125,6 +125,15 @@ def build_hetero_graph(train_df, user2idx, item2idx):
 
     return data
 
+def cosine_scores(item_embs, user_emb):
+    """Similaridade de cosseno em vez de produto escalar bruto,
+    para remover o efeito da norma do embedding (contaminada pelo grau de treino)."""
+    item_norms = np.linalg.norm(item_embs, axis=1, keepdims=True)
+    item_norms = np.clip(item_norms, 1e-8, None)
+    user_norm  = np.linalg.norm(user_emb)
+    user_norm  = max(user_norm, 1e-8)
+    return (item_embs @ user_emb) / (item_norms.flatten() * user_norm)
+
 def sample_negative(user_idx, train_pos_set, n_items):
     while True:
         neg = np.random.randint(0, n_items)
@@ -150,7 +159,7 @@ def evaluate_model_ndcg(model, test_df, user2idx, item2idx, x_dict, edge_index_d
         test_items_mapped = [it for it in test_items if it in item2idx]
         if not test_item_indices:
             continue
-        scores       = image_emb[test_item_indices].dot(user_emb[u_idx])
+        scores       = cosine_scores(image_emb[test_item_indices], user_emb[u_idx])
         ranked_idx   = np.argsort(-scores)
         ranked_items = [test_items_mapped[i] for i in ranked_idx[:TOP_K]]
         ndcg_list.append(evaluation.ndcg_at_k(ranked_items, relevant, 10))
@@ -168,8 +177,8 @@ acc_mrr  = pd.DataFrame(0.0, index=range(1), columns=cols)
 
 precision1_all, recall10_all, hit10_all, ndcg10_all, mrr10_all = [], [], [], [], []
 
-all_diagnostics = []      # <-- novo: grau de treino + norma do embedding por imagem
-all_recommendations = []  # <-- novo: top-10 real por utilizador
+all_diagnostics = []
+all_recommendations = []
 
 print(f"\nAvaliação sobre catálogo completo — kfold ({K_FOLDS} folds)...")
 
@@ -207,7 +216,7 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
     edge_attr_dict  = {k: v.edge_attr  for k, v in graph.edge_items() if hasattr(v, 'edge_attr')}
     x_dict = {k: v.x for k, v in graph.node_items()}
 
-    model = HeteroGAT(
+    model = HeteroGATv2(
         user_feat_dim=user_feat_dim,
         image_feat_dim=image_feat_dim,
         edge_feat_dim=len(EMO_COLS),
@@ -297,7 +306,7 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
 
         u_idx             = user2idx[user]
         candidate_indices = [item2idx[it] for it in candidates]
-        scores            = image_emb[candidate_indices].dot(user_emb[u_idx])
+        scores            = cosine_scores(image_emb[candidate_indices], user_emb[u_idx])
         ranked_idx        = np.argsort(-scores)
         ranked_items      = [candidates[i] for i in ranked_idx[:TOP_K]]
         ranked_scores     = scores[ranked_idx[:TOP_K]]
@@ -341,7 +350,7 @@ mean_f1   = acc_f1   / K_FOLDS
 mean_mrr  = acc_mrr  / K_FOLDS
 
 print("\n" + "="*60)
-print("HeteroGAT — Avaliação Catálogo Completo (kfold5)")
+print("HeteroGATv2 — Avaliação Catálogo Completo (kfold5)")
 print("="*60)
 print("\nPrecision@k:") ; print(mean_prec.to_string(index=False))
 print("\nRecall@k:")    ; print(mean_rec.to_string(index=False))
@@ -358,20 +367,20 @@ print(f"  N_users:      {len(precision1_all)}")
 
 os.makedirs("../results", exist_ok=True)
 fixed = pd.DataFrame([{
-    "model":        "HeteroGAT_FullCatalog",
+    "model":        "HeteroGATv2_FullCatalog_Cosine",
     "Precision@1":  round(np.mean(precision1_all), 4),
     "Recall@10":    round(np.mean(recall10_all), 4),
     "HitRate@10":   round(np.mean(hit10_all), 4),
     "NDCG@10":      round(np.mean(ndcg10_all), 4),
     "MRR@10":       round(np.mean(mrr10_all), 4)
 }])
-fixed.to_csv("../results/fixed_metrics_heterogat_full.csv", index=False)
+fixed.to_csv("../results/fixed_metrics_heterogatv2_full_cosine.csv", index=False)
 
 diag_df = pd.DataFrame(all_diagnostics)
-diag_df.to_csv("../results/diagnostic_heterogat_full.csv", index=False)
+diag_df.to_csv("../results/diagnostic_heterogatv2_full_cosine.csv", index=False)
 
 recs_df = pd.DataFrame(all_recommendations)
-recs_df.to_csv("../results/recommendations_heterogat_full.csv", index=False)
+recs_df.to_csv("../results/recommendations_heterogatv2_full_cosine.csv", index=False)
 
 print(f"\nDiagnóstico guardado: {len(diag_df)} linhas (grau + norma por imagem/fold)")
 print(f"Recomendações guardadas: {len(recs_df)} linhas")
