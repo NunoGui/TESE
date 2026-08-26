@@ -1,2 +1,2 @@
 model,Precision@1,Recall@10,HitRate@10,NDCG@10,MRR@10
-HeteroGAT,0.7382,0.996,0.9995,0.8621,0.845
+HeteroGAT,0.7341,0.9947,0.9991,0.8617,0.8409

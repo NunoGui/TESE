@@ -32,9 +32,14 @@ np.random.seed(BASE_SEED)
 torch.manual_seed(BASE_SEED)
 device = torch.device("cpu")
 
+# ── Forçar determinismo total (evitar variação de resultados entre corridas)
+torch.set_num_threads(1)  # BLAS/OpenMP multi-thread pode somar em ordens diferentes entre corridas
+torch.use_deterministic_algorithms(True, warn_only=True)
+
 EMO_COLS  = ['valence', 'arousal', 'dominance',
              'happiness', 'sadness', 'anger', 'fear', 'surprise', 'disgust', 'neutral']
 DEMO_COLS = ['age_group', 'populational_aff', 'gender', 'education', 'country']
+image_feat_dim = len(EMO_COLS)
 
 # ── Carregar melhores hiperparâmetros do tuning
 PARAMS_PATH = "../results/hetero_gat_best_params.json"
@@ -71,8 +76,12 @@ demo_encoded = pd.get_dummies(users_df[['user'] + DEMO_COLS], columns=DEMO_COLS)
 demo_encoded = demo_encoded.set_index('user')
 user_feat_dim = demo_encoded.shape[1]
 
-image_features = ratings.groupby('item')[EMO_COLS].mean()
-image_feat_dim = len(EMO_COLS)
+# NOTA (correção de fuga de dados): image_features deixou de ser calculado aqui,
+# a partir do `ratings` completo. Isso permitia que a média de emoções de cada
+# imagem incluísse interações que, num dado fold, pertencem ao conjunto de teste
+# — ou seja, o modelo via indiretamente informação de teste durante o treino.
+# Agora este cálculo é feito dentro do loop de fold, usando apenas `train_df`
+# (ver mais abaixo).
 
 print(f"  Users: {ratings['user'].nunique()} | Items: {ratings['item'].nunique()}")
 print(f"  Features demográficas (one-hot): {user_feat_dim}")
@@ -80,7 +89,7 @@ print(f"  Features demográficas (one-hot): {user_feat_dim}")
 # ──────────────────────────────────────────────
 # 2. Construir HeteroData
 # ──────────────────────────────────────────────
-def build_hetero_graph(train_df, user2idx, item2idx):
+def build_hetero_graph(train_df, user2idx, item2idx, image_features):
     data = HeteroData()
 
     user_ids_sorted = sorted(user2idx.keys())
@@ -180,13 +189,17 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
     torch.manual_seed(BASE_SEED + k)
     np.random.seed(BASE_SEED + k)
 
+    # ── CORREÇÃO: image_features calculado só a partir do train_df deste fold,
+    # nunca a partir do ratings completo — elimina a fuga de informação de teste.
+    image_features = train_df.groupby('item')[EMO_COLS].mean()
+
     user_ids = sorted(train_df['user'].unique())
     item_ids = sorted(ratings['item'].unique())
     user2idx = {u: i for i, u in enumerate(user_ids)}
     item2idx = {it: i for i, it in enumerate(item_ids)}
     n_items  = len(item_ids)
 
-    graph = build_hetero_graph(train_df, user2idx, item2idx).to(device)
+    graph = build_hetero_graph(train_df, user2idx, item2idx, image_features).to(device)
 
     train_pos = train_df[train_df['rating'] == 1]
     train_pos_set = {}

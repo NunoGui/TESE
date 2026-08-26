@@ -71,7 +71,10 @@ demo_encoded = pd.get_dummies(users_df[['user'] + DEMO_COLS], columns=DEMO_COLS)
 demo_encoded = demo_encoded.set_index('user')
 user_feat_dim = demo_encoded.shape[1]
 
-image_features = ratings.groupby('item')[EMO_COLS].mean()
+# NOTA (correção de fuga de dados): image_features deixou de ser calculado aqui,
+# a partir do `ratings` completo. Isso permitia que a média de emoções de cada
+# imagem incluísse interações que, num dado fold, pertencem ao conjunto de teste.
+# Agora este cálculo é feito dentro do loop de fold, usando apenas `train_df`.
 image_feat_dim = len(EMO_COLS)
 
 all_items = set(ratings['item'].unique())
@@ -80,7 +83,7 @@ print(f"  Users: {ratings['user'].nunique()} | Items no catálogo: {len(all_item
 # ──────────────────────────────────────────────
 # 2. Funções auxiliares
 # ──────────────────────────────────────────────
-def build_hetero_graph(train_df, user2idx, item2idx):
+def build_hetero_graph(train_df, user2idx, item2idx, image_features):
     data = HeteroData()
 
     user_ids_sorted = sorted(user2idx.keys())
@@ -179,13 +182,16 @@ for k, train_df, test_df in split.kfold_split(ratings, K_FOLDS, TOTAL_ITEMS, MIN
     torch.manual_seed(BASE_SEED + k)
     np.random.seed(BASE_SEED + k)
 
+    # ── CORREÇÃO: image_features calculado só a partir do train_df deste fold
+    image_features = train_df.groupby('item')[EMO_COLS].mean()
+
     user_ids = sorted(train_df['user'].unique())
     item_ids = sorted(ratings['item'].unique())
     user2idx = {u: i for i, u in enumerate(user_ids)}
     item2idx = {it: i for i, it in enumerate(item_ids)}
     n_items  = len(item_ids)
 
-    graph = build_hetero_graph(train_df, user2idx, item2idx).to(device)
+    graph = build_hetero_graph(train_df, user2idx, item2idx, image_features).to(device)
 
     train_pos = train_df[train_df['rating'] == 1]
     train_pos_set = {}
