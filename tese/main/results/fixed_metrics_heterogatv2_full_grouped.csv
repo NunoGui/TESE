@@ -1,0 +1,2 @@
+model,Precision@1,Recall@10,HitRate@10,NDCG@10,MRR@10
+HeteroGATv2_FullCatalog_Grouped,0.2293,0.4449,0.5991,0.3235,0.3343

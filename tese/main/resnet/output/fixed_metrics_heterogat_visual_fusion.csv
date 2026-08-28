@@ -1,0 +1,2 @@
+model,Precision@1,Recall@10,HitRate@10,NDCG@10,MRR@10
+HeteroGAT_Visual_Fusion,0.7341,0.9961,0.9995,0.8643,0.8447

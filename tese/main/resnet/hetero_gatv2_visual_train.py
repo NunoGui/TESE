@@ -72,6 +72,10 @@ np.random.seed(BASE_SEED)
 torch.manual_seed(BASE_SEED)
 device = torch.device("cpu")
 
+# ── Forçar determinismo total (evitar variação de resultados entre corridas)
+torch.set_num_threads(1)  # BLAS/OpenMP multi-thread pode somar em ordens diferentes entre corridas
+torch.use_deterministic_algorithms(True, warn_only=True)
+
 EMO_COLS  = ['valence', 'arousal', 'dominance',
              'happiness', 'sadness', 'anger', 'fear', 'surprise', 'disgust', 'neutral']
 DEMO_COLS = ['age_group', 'populational_aff', 'gender', 'education', 'country']
@@ -106,7 +110,18 @@ ratings = split.remove_degenerate_users(ratings)
 users_df = pd.read_csv(PATH_USERS).fillna("Unknown")
 users_df = users_df.rename(columns={"user_id": "user"})
 
-demo_encoded = pd.get_dummies(users_df[['user'] + DEMO_COLS], columns=DEMO_COLS)
+# CODIFICAÇÃO DEMOGRÁFICA FINAL: categorias com menos de RARE_THRESHOLD
+# utilizadores são agrupadas em "Other" antes do one-hot, reduzindo o
+# vetor de 47 para 24 dimensões (ver secção "Demographic Feature Encoding:
+# Testing Its Contribution"), consistente com todos os outros modelos.
+RARE_THRESHOLD = 10
+users_grouped = users_df.copy()
+for col in DEMO_COLS:
+    counts = users_df[col].value_counts()
+    rare_categories = counts[counts < RARE_THRESHOLD].index
+    users_grouped[col] = users_df[col].apply(lambda x: 'Other' if x in rare_categories else x)
+
+demo_encoded = pd.get_dummies(users_grouped[['user'] + DEMO_COLS], columns=DEMO_COLS)
 demo_encoded = demo_encoded.set_index('user')
 user_feat_dim = demo_encoded.shape[1]
 
